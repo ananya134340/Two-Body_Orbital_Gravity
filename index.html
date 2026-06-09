@@ -12,7 +12,7 @@
         @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #030712;
+            background-color: #020408;
             overflow: hidden;
         }
         .font-mono-custom {
@@ -204,6 +204,7 @@
         let planetMass = 10;
         let planet = { x: 0, y: 0, vx: 0, vy: 0, trail: [] };
         let sun = { x: 0, y: 0 };
+        let backgroundStars = [];
 
         // Global Math panel explanation string
         const gravityExp = "Newton's Law of Universal Gravitation states that any two masses attract each other with a force proportional to the product of their masses and inversely proportional to the square of their distance.";
@@ -212,9 +213,24 @@
         function resizeCanvas() {
             canvas.width = canvas.parentElement.clientWidth;
             canvas.height = canvas.parentElement.clientHeight;
+            generateBackgroundStars();
             resetExperimentStates();
         }
         window.addEventListener('resize', resizeCanvas);
+
+        // Generate non-interactive distant stars for realism
+        function generateBackgroundStars() {
+            backgroundStars = [];
+            const count = Math.floor((canvas.width * canvas.height) / 4500); // Star density factor
+            for (let i = 0; i < count; i++) {
+                backgroundStars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 1.5 + 0.4,
+                    opacity: Math.random() * 0.7 + 0.3
+                });
+            }
+        }
 
         // Setup clean starting positions relative to canvas dimensions
         function resetExperimentStates() {
@@ -353,12 +369,26 @@
 
         // Draw HUD Elements, vectors, and live mathematical feedback equations
         function drawScene() {
-            // Dark space background rendering
-            ctx.fillStyle = '#020308';
+            // Cosmic Space Radial Gradient (Subtle center nebular lighting)
+            const spaceGradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, 20, 
+                canvas.width / 2, canvas.height / 2, canvas.width
+            );
+            spaceGradient.addColorStop(0, '#060a17'); // Dark Indigo nebula core
+            spaceGradient.addColorStop(0.6, '#03050c'); // Deep cosmic expanse
+            spaceGradient.addColorStop(1, '#010204'); // Absolute edge black
+            
+            ctx.fillStyle = spaceGradient;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Subtle coordinate grid background
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
+            // Render Non-interactive Background Stars
+            backgroundStars.forEach(star => {
+                ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
+                ctx.fillRect(star.x - star.size/2, star.y - star.size/2, star.size, star.size);
+            });
+
+            // Subtle coordinate grid background overlay
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.012)';
             ctx.lineWidth = 1;
             const gridScale = 50;
             for (let x = 0; x < canvas.width; x += gridScale) {
