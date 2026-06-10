@@ -206,6 +206,13 @@
         let sun = { x: 0, y: 0 };
         let backgroundStars = [];
 
+        // Collision Animation States
+        let isCollided = false;
+        let collisionTimer = 0; // Tick timer for explosion state and countdown
+        const collisionDuration = 120; // 2 seconds of explosion timeline at 60fps
+        let particles = [];
+        let screenShakeAmount = 0;
+
         // Global Math panel explanation string
         const gravityExp = "Newton's Law of Universal Gravitation states that any two masses attract each other with a force proportional to the product of their masses and inversely proportional to the square of their distance.";
 
@@ -249,6 +256,32 @@
             planet.vx = orbitalVelocity;
             planet.vy = 0;
             planet.trail = [];
+            isCollided = false;
+            collisionTimer = 0;
+            particles = [];
+            screenShakeAmount = 0;
+        }
+
+        // Spawn a radial particle explosion at the point of impact
+        function triggerCollisionExplosion(x, y) {
+            particles = [];
+            screenShakeAmount = 15; // Set screen shake intensity
+            
+            const numParticles = 60;
+            for (let i = 0; i < numParticles; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 6 + 2;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 3.5 + 1,
+                    color: Math.random() > 0.4 ? '#f43f5e' : (Math.random() > 0.5 ? '#fbbf24' : '#38bdf8'), // hot red, solar yellow, or stellar blue fragments
+                    alpha: 1,
+                    decay: Math.random() * 0.015 + 0.008
+                });
+            }
         }
 
         // Global Event listeners setup
@@ -310,6 +343,7 @@
             };
 
             canvas.addEventListener('mousedown', (e) => {
+                if (isCollided) return; // Prevent grabbing dead body during collision sequence
                 const mouse = getCanvasCoords(e);
                 const dist = Math.hypot(mouse.x - planet.x, mouse.y - planet.y);
                 if (dist < 30) {
@@ -318,7 +352,7 @@
             });
 
             canvas.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
+                if (!isDragging || isCollided) return;
                 const mouse = getCanvasCoords(e);
 
                 // Update planet displacement & slingshot vector direction
@@ -336,6 +370,32 @@
 
         // CORE MATHEMATICS EVALUATIONS & VECTOR DRAWING LOOP
         function runPhysicsStep() {
+            // Animate and update explosion particles regardless of simulation pause state
+            particles.forEach(p => {
+                p.x += p.vx * globalSpeed;
+                p.y += p.vy * globalSpeed;
+                p.vx *= 0.98; // Apply fluid drag/friction
+                p.vy *= 0.98;
+                p.alpha -= p.decay * globalSpeed;
+            });
+            // Prune dead particles
+            particles = particles.filter(p => p.alpha > 0);
+
+            // Decay screen shake
+            if (screenShakeAmount > 0) {
+                screenShakeAmount *= 0.9;
+                if (screenShakeAmount < 0.1) screenShakeAmount = 0;
+            }
+
+            // Handle the auto-respawn timer phase if already collided
+            if (isCollided) {
+                collisionTimer -= globalSpeed;
+                if (collisionTimer <= 0) {
+                    resetExperimentStates();
+                }
+                return;
+            }
+
             if (isPaused || isDragging) return;
 
             const dt = 0.1 * globalSpeed; // Integration step increment
@@ -344,6 +404,14 @@
             const dx = sun.x - planet.x;
             const dy = sun.y - planet.y;
             const dist = Math.hypot(dx, dy);
+
+            // COLLISION THRESHOLD: 14px (Sun core radius) + 6px (Planet core radius) = 20px
+            if (dist <= 20) {
+                isCollided = true;
+                collisionTimer = collisionDuration;
+                triggerCollisionExplosion(planet.x, planet.y);
+                return;
+            }
 
             if (dist > 10) {
                 // Force = G * M * m / r^2
@@ -369,6 +437,15 @@
 
         // Draw HUD Elements, vectors, and live mathematical feedback equations
         function drawScene() {
+            ctx.save();
+            
+            // Apply screen shake offset transformation if active
+            if (screenShakeAmount > 0) {
+                const shakeX = (Math.random() - 0.5) * screenShakeAmount;
+                const shakeY = (Math.random() - 0.5) * screenShakeAmount;
+                ctx.translate(shakeX, shakeY);
+            }
+
             // Cosmic Space Radial Gradient (Subtle center nebular lighting)
             const spaceGradient = ctx.createRadialGradient(
                 canvas.width / 2, canvas.height / 2, 20, 
@@ -399,6 +476,19 @@
             }
 
             drawGravityUI();
+
+            // Draw explosion particles
+            particles.forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+
+            ctx.restore(); // Reset screen shake transformations
         }
 
         // Draw gravity mode details
@@ -418,7 +508,7 @@
             ctx.beginPath(); ctx.arc(sun.x, sun.y, 14, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
 
             // Draw Orbital path line
-            if (planet.trail.length > 1) {
+            if (!isCollided && planet.trail.length > 1) {
                 ctx.beginPath();
                 ctx.moveTo(planet.trail[0].x, planet.trail[0].y);
                 for (let i = 1; i < planet.trail.length; i++) {
@@ -429,52 +519,75 @@
                 ctx.stroke();
             }
 
-            // Draw Planet
-            const planetGlow = ctx.createRadialGradient(planet.x, planet.y, 1, planet.x, planet.y, 18);
-            planetGlow.addColorStop(0, '#38bdf8');
-            planetGlow.addColorStop(0.3, 'rgba(56, 189, 248, 0.4)');
-            planetGlow.addColorStop(1, 'transparent');
-            ctx.beginPath(); ctx.arc(planet.x, planet.y, 18, 0, Math.PI * 2); ctx.fillStyle = planetGlow; ctx.fill();
-            ctx.beginPath(); ctx.arc(planet.x, planet.y, 6, 0, Math.PI * 2); ctx.fillStyle = '#38bdf8'; ctx.fill();
-
-            // MATH CALCULATIONS OVERLAY
+            // MATH CALCULATIONS OVERLAY (Keep calculations showing last recorded variables if dead)
             const dx = sun.x - planet.x;
             const dy = sun.y - planet.y;
-            const r = Math.hypot(dx, dy);
+            const r = isCollided ? 20.0 : Math.hypot(dx, dy);
 
             // Newton Gravity math: F = G*M*m/r^2
-            const forceVal = (gConst * sunMass * planetMass) / (r * r);
-            const rawV = Math.hypot(planet.vx, planet.vy);
+            const forceVal = isCollided ? 0 : (gConst * sunMass * planetMass) / (r * r);
+            const rawV = isCollided ? 0 : Math.hypot(planet.vx, planet.vy);
 
-            // Draw distance vector helper
-            ctx.beginPath();
-            ctx.moveTo(sun.x, sun.y);
-            ctx.lineTo(planet.x, planet.y);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.setLineDash([4, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            if (!isCollided) {
+                // Draw Planet
+                const planetGlow = ctx.createRadialGradient(planet.x, planet.y, 1, planet.x, planet.y, 18);
+                planetGlow.addColorStop(0, '#38bdf8');
+                planetGlow.addColorStop(0.3, 'rgba(56, 189, 248, 0.4)');
+                planetGlow.addColorStop(1, 'transparent');
+                ctx.beginPath(); ctx.arc(planet.x, planet.y, 18, 0, Math.PI * 2); ctx.fillStyle = planetGlow; ctx.fill();
+                ctx.beginPath(); ctx.arc(planet.x, planet.y, 6, 0, Math.PI * 2); ctx.fillStyle = '#38bdf8'; ctx.fill();
 
-            // Text distance tag
-            ctx.fillStyle = '#9ca3af';
-            ctx.font = '10px Fira Code';
-            ctx.fillText(`r = ${r.toFixed(1)} px`, (sun.x + planet.x) / 2 + 10, (sun.y + planet.y) / 2 - 10);
+                // Draw distance vector helper
+                ctx.beginPath();
+                ctx.moveTo(sun.x, sun.y);
+                ctx.lineTo(planet.x, planet.y);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.setLineDash([]);
 
-            // Draw Force & Velocity kinematic vectors on canvas
-            if (drawForceVec) {
-                // Vector pointing to Sun (attraction)
-                drawArrow(planet.x, planet.y, planet.x + (dx / r) * (forceVal * 12), planet.y + (dy / r) * (forceVal * 12), '#f87171', 'F_gravity');
-            }
-            if (drawVelocityVec) {
-                // Vector tangent to path pointing forward
-                drawArrow(planet.x, planet.y, planet.x + planet.vx * 12, planet.y + planet.vy * 12, '#34d399', 'Velocity');
+                // Text distance tag
+                ctx.fillStyle = '#9ca3af';
+                ctx.font = '10px Fira Code';
+                ctx.fillText(`r = ${r.toFixed(1)} px`, (sun.x + planet.x) / 2 + 10, (sun.y + planet.y) / 2 - 10);
+
+                // Draw Force & Velocity kinematic vectors on canvas
+                if (drawForceVec) {
+                    // Vector pointing to Sun (attraction)
+                    drawArrow(planet.x, planet.y, planet.x + (dx / r) * (forceVal * 12), planet.y + (dy / r) * (forceVal * 12), '#f87171', 'F_gravity');
+                }
+                if (drawVelocityVec) {
+                    // Vector tangent to path pointing forward
+                    drawArrow(planet.x, planet.y, planet.x + planet.vx * 12, planet.y + planet.vy * 12, '#34d399', 'Velocity');
+                }
+            } else {
+                // Draw Collision / Countdown Alert on screen
+                ctx.save();
+                ctx.fillStyle = 'rgba(244, 63, 94, 0.15)';
+                ctx.strokeStyle = 'rgba(244, 63, 94, 0.4)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(canvas.width / 2 - 140, canvas.height / 2 - 150, 280, 70, 12);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#fda4af';
+                ctx.font = 'bold 12px Inter';
+                ctx.textAlign = 'center';
+                ctx.fillText("COLLISION DETECTED!", canvas.width / 2, canvas.height / 2 - 122);
+                
+                ctx.fillStyle = '#9ca3af';
+                ctx.font = '10px Fira Code';
+                const secondsLeft = Math.ceil(collisionTimer / 60);
+                ctx.fillText(`Respawning system in ${secondsLeft}s...`, canvas.width / 2, canvas.height / 2 - 102);
+                ctx.restore();
             }
 
             // Energy equations updates:
             // K = 1/2 * m * v^2
-            const ke = 0.5 * planetMass * (rawV * rawV);
+            const ke = isCollided ? 0 : 0.5 * planetMass * (rawV * rawV);
             // U = -G * M * m / r
-            const pe = -(gConst * sunMass * planetMass) / r;
+            const pe = isCollided ? 0 : -(gConst * sunMass * planetMass) / r;
             updateEnergyMeter(ke, pe);
 
             // Physics text injects
